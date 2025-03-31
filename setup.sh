@@ -10,7 +10,7 @@ SCRIPT_VERSION="1.0.0"
 # GitHub credentials - These will be provided as environment variables when executing the script
 
 # SSH key configuration
-SSH_KEY_PATH="$HOME/.ssh/github_key"
+SSH_KEY_PATH="$HOME/.ssh/id_rsa"
 FORCE_OVERWRITE="false"
 
 # Additional settings
@@ -137,13 +137,23 @@ upload_key_to_github() {
   
   local public_key=$(cat "$ssh_key_path")
   
-  # Create a JSON payload
+  # Create a JSON payload using heredoc (this handles special characters better)
+  local json_payload=$(cat <<EOF
+{
+  "title": "$key_title",
+  "key": "$public_key"
+}
+EOF
+)
+  
   log_info "Uploading SSH key to GitHub"
+  log_info "API URL: https://api.github.com/user/keys"
+  log_info "Using token: ${GITHUB_TOKEN:0:4}...${GITHUB_TOKEN:(-4)}"  # Show first 4 and last 4 chars of token
   
   local response=$(curl -s -w "\n%{http_code}" -X POST \
     -H "Accept: application/vnd.github+json" \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
-    -d "{\"title\":\"$key_title\",\"key\":\"$public_key\"}" \
+    -d "$json_payload" \
     "https://api.github.com/user/keys")
   
   # Extract the HTTP status code and response body
@@ -153,16 +163,26 @@ upload_key_to_github() {
   # Check for different types of errors
   if [ "$status_code" = "401" ]; then
     log_error "Authentication Error (401): Bad credentials"
-    log_error "GitHub token was rejected. Please check your token."
+    log_error "Your token was rejected by GitHub. Please check that:"
+    log_error "  1. The token is valid and has not expired"
+    log_error "  2. The token has the 'write:public_key' scope"
+    log_error "  3. The token is entered correctly (e.g., ghp_xxxxxxxx or github_pat_xxxxxxxx)"
+    log_error "Response from GitHub:"
+    echo "$response_body"
     exit 1
   elif [ "$status_code" = "422" ]; then
-    log_warning "Key may already exist on GitHub (422 response)"
+    log_warning "Validation Error (422): Key may already exist"
+    log_warning "GitHub rejected the SSH key. This usually happens if the key is already added to your account."
+    log_warning "Response from GitHub:"
+    echo "$response_body"
     # Continue anyway - this might be a reboot with same key
   elif [ "$status_code" != "201" ]; then
-    log_error "Error uploading key (HTTP $status_code): $response_body"
+    log_error "Error (HTTP $status_code):"
+    log_error "Response from GitHub:"
+    echo "$response_body"
     exit 1
   else
-    log_success "SSH key uploaded to GitHub successfully"
+    log_success "SSH key uploaded to GitHub successfully!"
   fi
 }
 
@@ -198,7 +218,9 @@ run_additional_tasks() {
   
   # Update system packages
   log_info "Installing neovim"
-  apt-get update && apt-get install -y neovim
+  sudo add-apt-repository -y ppa:neovim-ppa/unstable
+  sudo apt-get update -y
+  sudo apt-get install -y neovim
   
   # Clone dotfiles and set up neovim
   log_info "Setting up neovim config"
@@ -244,4 +266,3 @@ main() {
 
 # Run the main function
 main
-
