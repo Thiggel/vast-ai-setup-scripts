@@ -238,6 +238,8 @@ run_additional_tasks() {
   cd ~
   if [ ! -d "cephalometry" ]; then
     git clone "$PROJECT_REPO_SSH_URL"
+    cd Cephalometry
+    pip install -r requirements.txt
   fi
   
   log_success "Additional tasks completed"
